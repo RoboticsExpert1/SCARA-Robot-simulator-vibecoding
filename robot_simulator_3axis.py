@@ -9,7 +9,7 @@ import time
 class RobotSimulator3D:
     def __init__(self, root):
         self.root = root
-        self.root.title("3D SCARA - Stop Control & Limit Guard")
+        self.root.title("3D SCARA - Workspace Restored & Z-Axis Fixed")
         self.root.geometry("1600x950")
         
         # --- Physical State ---
@@ -124,7 +124,6 @@ class RobotSimulator3D:
 
         self.m_repeat = self.create_input(self.left_panel, "Repeat:", "1")
         
-        # Action Buttons
         btn_f = ttk.Frame(self.left_panel); btn_f.pack(fill='x', pady=10)
         self.start_btn = ttk.Button(btn_f, text="START MISSION", command=self.run_mission)
         self.start_btn.pack(side=tk.LEFT, fill='x', expand=True, padx=2)
@@ -176,7 +175,6 @@ class RobotSimulator3D:
 
         for i in range(steps + 1):
             if self.stop_requested: return False
-            
             ratio = i / steps
             if self.motion_mode.get() == "SCURVE":
                 ratio = 1 / (1 + math.exp(-8 * (ratio - 0.5)))
@@ -199,14 +197,10 @@ class RobotSimulator3D:
                         cx += (vec_x / mag) * strength
                         cy += (vec_y / mag) * strength
 
-            # Solve IK and Check Hardware Limits
             if self.solve_ik(cx, cy, cz):
                 deg1, deg2 = math.degrees(self.theta1), math.degrees(self.theta2)
-                
-                # RANGE CHECK
                 if not (0 <= deg1 <= self.max_theta1) or not (0 <= deg2 <= self.max_theta2):
-                    messagebox.showerror("Hardware Limit", 
-                        f"Joint out of range!\nTheta1: {deg1:.1f}/{self.max_theta1}\nTheta2: {deg2:.1f}/{self.max_theta2}")
+                    messagebox.showerror("Hardware Limit", f"Joint out of range!\nTheta1: {deg1:.1f}\nTheta2: {deg2:.1f}")
                     return False
 
                 dt = 0.05
@@ -220,12 +214,26 @@ class RobotSimulator3D:
                 prev_t1, prev_t2 = self.theta1, self.theta2
                 self.update_plot(); self.root.update(); time.sleep(0.01)
             else:
-                messagebox.showwarning("IK Error", "Target out of workspace reach.")
+                messagebox.showwarning("IK Error", "Target out of reach.")
                 return False
         return True
 
     def update_plot(self):
         self.ax_3d.clear()
+        
+        # --- Workspace Visualization (Restored) ---
+        res = 50
+        phi = np.linspace(0, math.radians(self.max_theta1), res)
+        # Outer Boundary
+        outer_x = (self.l1 + self.l2) * np.cos(phi)
+        outer_y = (self.l1 + self.l2) * np.sin(phi)
+        self.ax_3d.plot(outer_x, outer_y, [self.base_h]*res, color='gray', linestyle='--', lw=0.8, alpha=0.5)
+        # Inner Boundary
+        inner_r = abs(self.l1 - self.l2)
+        inner_x = inner_r * np.cos(phi)
+        inner_y = inner_r * np.sin(phi)
+        self.ax_3d.plot(inner_x, inner_y, [self.base_h]*res, color='gray', linestyle='--', lw=0.8, alpha=0.5)
+
         if self.waypoint_a: self.ax_3d.scatter(*self.waypoint_a, color='blue', s=50)
         if self.waypoint_b: self.ax_3d.scatter(*self.waypoint_b, color='purple', s=50)
         if self.obs_enabled.get(): self.draw_cube(*self.obs_pos, *self.obs_size, color='orange')
@@ -236,12 +244,16 @@ class RobotSimulator3D:
         
         x1, y1 = self.l1 * math.cos(self.theta1), self.l1 * math.sin(self.theta1)
         x2, y2 = x1 + self.l2 * math.cos(self.theta1+self.theta2), y1 + self.l2 * math.sin(self.theta1+self.theta2)
+        
+        # Z-Axis Fixed Drawing
         zb = self.base_h - self.z_slide
         self.ax_3d.plot([0, x1, x2], [0, y1, y2], [self.base_h, self.base_h, self.base_h], color='black', lw=5)
-        self.ax_3d.plot([x2, x2], [y2, y2], [zb, self.base_h+15], color='red', lw=3)
+        # Shaft visualization (Rigidly tied to base_h and zb)
+        self.ax_3d.plot([x2, x2], [y2, y2], [zb, self.base_h + 20], color='red', lw=3)
+        
         self.ax_3d.set_xlim(-300, 300); self.ax_3d.set_ylim(-300, 300); self.ax_3d.set_zlim(0, 400)
+        self.ax_3d.set_xlabel('X'); self.ax_3d.set_ylabel('Y'); self.ax_3d.set_zlabel('Z')
 
-        # Graphs
         self.ax_angle.clear(); self.ax_angle.plot(self.history['t'], self.history['t1'], label='L1'); self.ax_angle.plot(self.history['t'], self.history['t2'], label='L2')
         self.ax_angle.set_title("Angle (deg)"); self.ax_angle.legend(loc='lower right')
         self.ax_vel.clear(); self.ax_vel.plot(self.history['t'], self.history['v1'], color='red'); self.ax_vel.plot(self.history['t'], self.history['v2'], color='green')
@@ -260,7 +272,9 @@ class RobotSimulator3D:
             cos_t2 = (d_sq - self.l1**2 - self.l2**2) / (2 * self.l1 * self.l2)
             t2 = math.acos(max(-1, min(1, cos_t2)))
             t1 = math.atan2(y, x) - math.atan2(self.l2 * math.sin(t2), self.l1 + self.l2 * math.cos(t2))
-            self.theta1, self.theta2, self.z_slide = t1, t2, max(0, min(self.l3, z))
+            self.theta1, self.theta2 = t1, t2
+            # Z-axis value is clamped to physical limit (l3)
+            self.z_slide = max(0, min(self.l3, z))
             return True
         return False
 
