@@ -36,3 +36,5 @@ This repository demonstrates the advanced application of "Vibe Coding." Handling
 2. Install the required external library for the graphing features:
    ```bash
    pip install matplotlib
+   Run the script:
+3. python robot_simulator_2axis.py
