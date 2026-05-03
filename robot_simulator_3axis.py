@@ -9,12 +9,12 @@ import time
 class RobotSimulator3D:
     def __init__(self, root):
         self.root = root
-        self.root.title("3D SCARA - Workspace Restored & Z-Axis Fixed")
+        self.root.title("Robot Simulator")
         self.root.geometry("1600x950")
         
         # --- Physical State ---
-        self.l1, self.l2, self.l3 = 150.0, 100.0, 120.0
-        self.base_h = 150.0
+        self.l1, self.l2, self.l3 = 150.0, 100.0, 150.0 # l3는 이제 고정된 샤프트 총 길이
+        self.base_h = 250.0  
         self.theta1, self.theta2, self.z_slide = math.radians(45), math.radians(45), 40.0 
         self.max_theta1, self.max_theta2 = 180.0, 150.0
         
@@ -86,19 +86,19 @@ class RobotSimulator3D:
         self.slider_frame = ttk.LabelFrame(self.left_panel, text="X-Y-Z Sliders", padding=5); self.slider_frame.pack(fill='x', pady=5)
         self.s_x = self.create_slider(self.slider_frame, "X", -300, 300)
         self.s_y = self.create_slider(self.slider_frame, "Y", -300, 300)
-        self.s_z = self.create_slider(self.slider_frame, "Z (Slide)", 0, self.l3)
+        self.s_z = self.create_slider(self.slider_frame, "Z-Slide", 0, self.l3)
         
         input_frame = ttk.LabelFrame(self.left_panel, text="Manual Entry", padding=5); input_frame.pack(fill='x', pady=5)
         self.in_a = self.create_input(input_frame, "X / θ1:", 150)
         self.in_b = self.create_input(input_frame, "Y / θ2:", 150)
-        self.in_c = self.create_input(input_frame, "Z-Slide:", 40)
+        self.in_c = self.create_input(input_frame, "Z-Slide (Distance):", 40)
         ttk.Button(input_frame, text="Apply Changes", command=self.handle_apply).pack(fill='x', pady=5)
 
     def build_hardware_ui(self):
         ttk.Label(self.left_panel, text="HARDWARE CONFIGURATION", font=('Arial', 11, 'bold')).pack(pady=5)
         self.h_l1 = self.create_input(self.left_panel, "Link 1 Length:", self.l1)
         self.h_l2 = self.create_input(self.left_panel, "Link 2 Length:", self.l2)
-        self.h_l3 = self.create_input(self.left_panel, "Link 3 Rigid Shaft:", self.l3)
+        self.h_l3 = self.create_input(self.left_panel, "Link 3 Shaft Total Length:", self.l3)
         self.h_base = self.create_input(self.left_panel, "Base Height:", self.base_h)
         self.h_m1 = self.create_input(self.left_panel, "Max Motor 1 Angle:", self.max_theta1)
         self.h_m2 = self.create_input(self.left_panel, "Max Motor 2 Angle:", self.max_theta2)
@@ -107,8 +107,8 @@ class RobotSimulator3D:
     def build_mission_ui(self):
         ttk.Label(self.left_panel, text="MISSION CONTROL", font=('Arial', 12, 'bold')).pack(pady=5)
         wf = ttk.LabelFrame(self.left_panel, text="Coordinates", padding=5); wf.pack(fill='x', pady=5)
-        self.m_p1 = self.create_input(wf, "Point A:", "150, 100, 40")
-        self.m_p2 = self.create_input(wf, "Point B:", "-50, 180, 20")
+        self.m_p1 = self.create_input(wf, "Point A (x,y,slide):", "150, 100, 40")
+        self.m_p2 = self.create_input(wf, "Point B (x,y,slide):", "-50, 180, 20")
         ttk.Button(wf, text="Apply Waypoints", command=self.apply_waypoints).pack(fill='x', pady=2)
         
         pf = ttk.LabelFrame(self.left_panel, text="Motion Profile", padding=5); pf.pack(fill='x', pady=5)
@@ -138,7 +138,7 @@ class RobotSimulator3D:
             self.waypoint_a = [float(x.strip()) for x in self.m_p1.get().split(',')]
             self.waypoint_b = [float(x.strip()) for x in self.m_p2.get().split(',')]
             self.update_plot()
-        except: messagebox.showerror("Error", "Check Coordinate Format (X,Y,Z)")
+        except: messagebox.showerror("Error", "Check Coordinate Format (X,Y,Slide)")
 
     def apply_obstacle(self):
         try:
@@ -175,6 +175,7 @@ class RobotSimulator3D:
 
         for i in range(steps + 1):
             if self.stop_requested: return False
+            
             ratio = i / steps
             if self.motion_mode.get() == "SCURVE":
                 ratio = 1 / (1 + math.exp(-8 * (ratio - 0.5)))
@@ -199,8 +200,8 @@ class RobotSimulator3D:
 
             if self.solve_ik(cx, cy, cz):
                 deg1, deg2 = math.degrees(self.theta1), math.degrees(self.theta2)
-                if not (0 <= deg1 <= self.max_theta1) or not (0 <= deg2 <= self.max_theta2):
-                    messagebox.showerror("Hardware Limit", f"Joint out of range!\nTheta1: {deg1:.1f}\nTheta2: {deg2:.1f}")
+                if abs(deg1) > self.max_theta1 or abs(deg2) > self.max_theta2:
+                    messagebox.showerror("Hardware Limit", f"Joint Limit Violation!\nT1: {deg1:.1f}/{self.max_theta1}\nT2: {deg2:.1f}/{self.max_theta2}")
                     return False
 
                 dt = 0.05
@@ -210,48 +211,47 @@ class RobotSimulator3D:
                 self.history['v1'].append((self.theta1 - prev_t1)/dt)
                 self.history['v2'].append((self.theta2 - prev_t2)/dt)
                 self.history['det'].append(abs(self.l1 * self.l2 * math.sin(self.theta2)))
+                # Z축 궤적: 물리적 끝점 위치 저장
                 self.trajectory_pts.append((cx, cy, self.base_h - self.z_slide))
                 prev_t1, prev_t2 = self.theta1, self.theta2
                 self.update_plot(); self.root.update(); time.sleep(0.01)
             else:
-                messagebox.showwarning("IK Error", "Target out of reach.")
+                messagebox.showwarning("IK Error", "Target out of workspace.")
                 return False
         return True
 
     def update_plot(self):
         self.ax_3d.clear()
         
-        # --- Workspace Visualization (Restored) ---
-        res = 50
-        phi = np.linspace(0, math.radians(self.max_theta1), res)
-        # Outer Boundary
-        outer_x = (self.l1 + self.l2) * np.cos(phi)
-        outer_y = (self.l1 + self.l2) * np.sin(phi)
-        self.ax_3d.plot(outer_x, outer_y, [self.base_h]*res, color='gray', linestyle='--', lw=0.8, alpha=0.5)
-        # Inner Boundary
-        inner_r = abs(self.l1 - self.l2)
-        inner_x = inner_r * np.cos(phi)
-        inner_y = inner_r * np.sin(phi)
-        self.ax_3d.plot(inner_x, inner_y, [self.base_h]*res, color='gray', linestyle='--', lw=0.8, alpha=0.5)
+        phi = np.linspace(0, 2*np.pi, 100)
+        r_max, r_min = self.l1 + self.l2, abs(self.l1 - self.l2)
+        self.ax_3d.plot(r_max*np.cos(phi), r_max*np.sin(phi), [self.base_h]*100, color='gray', linestyle='--', alpha=0.3)
+        self.ax_3d.plot(r_min*np.cos(phi), r_min*np.sin(phi), [self.base_h]*100, color='gray', linestyle='--', alpha=0.3)
 
-        if self.waypoint_a: self.ax_3d.scatter(*self.waypoint_a, color='blue', s=50)
-        if self.waypoint_b: self.ax_3d.scatter(*self.waypoint_b, color='purple', s=50)
+        if self.waypoint_a: self.ax_3d.scatter(self.waypoint_a[0], self.waypoint_a[1], self.base_h - self.waypoint_a[2], color='blue', s=50)
+        if self.waypoint_b: self.ax_3d.scatter(self.waypoint_b[0], self.waypoint_b[1], self.base_h - self.waypoint_b[2], color='purple', s=50)
         if self.obs_enabled.get(): self.draw_cube(*self.obs_pos, *self.obs_size, color='orange')
         
         if len(self.trajectory_pts) > 1:
             pts = np.array(self.trajectory_pts)
-            self.ax_3d.plot(pts[:,0], pts[:,1], pts[:,2], color='gray', linestyle='dashdot', lw=1, alpha=0.6)
+            self.ax_3d.plot(pts[:,0], pts[:,1], pts[:,2], color='gray', linestyle='--', lw=1, alpha=0.5)
         
         x1, y1 = self.l1 * math.cos(self.theta1), self.l1 * math.sin(self.theta1)
         x2, y2 = x1 + self.l2 * math.cos(self.theta1+self.theta2), y1 + self.l2 * math.sin(self.theta1+self.theta2)
         
-        # Z-Axis Fixed Drawing
-        zb = self.base_h - self.z_slide
-        self.ax_3d.plot([0, x1, x2], [0, y1, y2], [self.base_h, self.base_h, self.base_h], color='black', lw=5)
-        # Shaft visualization (Rigidly tied to base_h and zb)
-        self.ax_3d.plot([x2, x2], [y2, y2], [zb, self.base_h + 20], color='red', lw=3)
+        # --- Z축 로직 수정 (Shaft 길이 고정) ---
+        # L2 끝점에서 z_slide 만큼 아래로 내려간 지점이 엔드이펙터
+        ee_z = self.base_h - self.z_slide
+        # 샤프트 시각화: L2 관절(x2, y2, base_h)에서 고정 길이 l3를 가짐
+        # 샤프트의 윗부분과 아랫부분 좌표 계산
+        shaft_bottom = ee_z
+        shaft_top = ee_z + self.l3 
         
-        self.ax_3d.set_xlim(-300, 300); self.ax_3d.set_ylim(-300, 300); self.ax_3d.set_zlim(0, 400)
+        self.ax_3d.plot([0, x1, x2], [0, y1, y2], [self.base_h, self.base_h, self.base_h], color='black', lw=5)
+        # 샤프트 그리기: 관절 위치(x2, y2)에서 아래로 뻗음
+        self.ax_3d.plot([x2, x2], [y2, y2], [shaft_bottom, shaft_top], color='red', lw=4, marker='o')
+        
+        self.ax_3d.set_xlim(-350, 350); self.ax_3d.set_ylim(-350, 350); self.ax_3d.set_zlim(0, 450)
         self.ax_3d.set_xlabel('X'); self.ax_3d.set_ylabel('Y'); self.ax_3d.set_zlabel('Z')
 
         self.ax_angle.clear(); self.ax_angle.plot(self.history['t'], self.history['t1'], label='L1'); self.ax_angle.plot(self.history['t'], self.history['t2'], label='L2')
@@ -266,21 +266,20 @@ class RobotSimulator3D:
         f = [[0,1,2,3], [4,5,6,7], [0,1,5,4], [2,3,7,6], [0,3,7,4], [1,2,6,5]]
         for face in f: self.ax_3d.plot(v[face + [face[0]], 0], v[face + [face[0]], 1], v[face + [face[0]], 2], color=color)
 
-    def solve_ik(self, x, y, z):
+    def solve_ik(self, x, y, z_slide):
         d_sq = x**2 + y**2
         if (self.l1-self.l2)**2 <= d_sq <= (self.l1+self.l2)**2:
             cos_t2 = (d_sq - self.l1**2 - self.l2**2) / (2 * self.l1 * self.l2)
             t2 = math.acos(max(-1, min(1, cos_t2)))
             t1 = math.atan2(y, x) - math.atan2(self.l2 * math.sin(t2), self.l1 + self.l2 * math.cos(t2))
-            self.theta1, self.theta2 = t1, t2
-            # Z-axis value is clamped to physical limit (l3)
-            self.z_slide = max(0, min(self.l3, z))
+            # z_slide는 0~l3 범위 내로 제한
+            self.theta1, self.theta2, self.z_slide = t1, t2, max(0, min(self.l3, z_slide))
             return True
         return False
 
     def create_slider(self, parent, label, f, t):
         fr = ttk.Frame(parent); fr.pack(fill='x')
-        ttk.Label(fr, text=label, width=5).pack(side=tk.LEFT)
+        ttk.Label(fr, text=label, width=10).pack(side=tk.LEFT)
         s = ttk.Scale(fr, from_=f, to=t, orient='horizontal', command=lambda _: self.update_from_slider())
         s.pack(side=tk.RIGHT, fill='x', expand=True); return s
 
@@ -302,7 +301,7 @@ class RobotSimulator3D:
 
     def create_input(self, parent, label, default):
         f = ttk.Frame(parent); f.pack(fill='x', pady=1)
-        ttk.Label(f, text=label, width=15).pack(side=tk.LEFT)
+        ttk.Label(f, text=label, width=20).pack(side=tk.LEFT)
         e = ttk.Entry(f, width=15); e.insert(0, str(default)); e.pack(side=tk.RIGHT); return e
 
     def save_hardware(self):
