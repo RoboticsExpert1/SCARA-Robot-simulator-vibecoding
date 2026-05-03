@@ -38,4 +38,4 @@ This repository demonstrates the advanced application of "Vibe Coding." Handling
    pip install matplotlib
 3. Run the script:
    ```bash
-   python robot_simulator_2axis.py
+   python robot_simulator_3axis.py
